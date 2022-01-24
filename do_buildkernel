@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+export BASEDIR=$(pwd)
+export MAKEOBJDIRPREFIX=$BASEDIR/obj
+cd $BASEDIR/src
+make buildkernel TARGET_ARCH=aarch64 KERNCONF=IMX -DNO_CLEAN -j6

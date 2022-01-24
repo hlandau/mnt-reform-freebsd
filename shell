@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+export BASEDIR=$(pwd)
+export MAKEOBJDIRPREFIX=$BASEDIR/obj
+exec bash

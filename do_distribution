@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+export BASEDIR=$(pwd)
+export MAKEOBJDIRPREFIX=$BASEDIR/obj
+cd $BASEDIR/src
+if [ -n "$1" ]; then
+  DST="$1"
+else
+  DST="$BASEDIR/nfsroot/tree"
+fi
+sudo -E make distribution TARGET_ARCH=aarch64 DESTDIR="$DST" -j6

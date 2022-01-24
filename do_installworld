@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+export BASEDIR=$(pwd)
+export MAKEOBJDIRPREFIX=$BASEDIR/obj
+if [ -n "$1" ]; then
+  DST="$1"
+else
+  DST="$BASEDIR/nfsroot/tree"
+fi
+cd $BASEDIR/src
+sudo -E make installworld TARGET_ARCH=aarch64 DESTDIR="$DST" -j6

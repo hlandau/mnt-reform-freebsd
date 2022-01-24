@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -e
+TARGET="/usr/home/hugo/reform/nfsroot/target.img"
+
+MDDEV=
+ROOT_MNT_DIR=tmpmnt
+BOOT_MNT_DIR=tmpmnt/boot/reform
+
+get_mddev() {
+  if [ -n "$MDDEV" ]; then
+    return
+  fi
+  echo '==> Getting md device...'
+  MDDEV="$(sudo mdconfig -f "$TARGET" -x 63 -y 255)"
+}
+
+finish() {
+  if [ -n "$BOOT_MOUNTED" ]; then
+    echo >&2 Tearing down boot mount...
+    sudo umount "$BOOT_MNT_DIR"
+    BOOT_MOUNTED=
+  fi
+
+  if [ -n "$ROOT_MOUNTED" ]; then
+    echo >&2 Tearing down root mount...
+    sudo umount "$ROOT_MNT_DIR"
+    ROOT_MOUNTED=
+    rmdir "$ROOT_MNT_DIR"
+  fi
+
+  if [ -n "$MDDEV" ]; then
+    echo >&2 Tearing down md device...
+    sudo mdconfig -d -u "$MDDEV"
+    MDDEV=
+  fi
+}
+trap finish EXIT
+
+get_mounts() {
+  get_mddev
+  if [ -z "$ROOT_MOUNTED" ]; then
+    echo >&2 Mounting UFS partition...
+    sudo mkdir -p "$ROOT_MNT_DIR"
+    sudo mount /dev/"$MDDEV"s2a "$(realpath "$ROOT_MNT_DIR")"
+    ROOT_MOUNTED=1
+  fi
+  if [ -z "$BOOT_MOUNTED" ]; then
+    echo >&2 Mounting boot partition...
+    sudo mkdir -p "$BOOT_MNT_DIR"
+    sudo mount_msdosfs /dev/"$MDDEV"s1 "$(realpath "$BOOT_MNT_DIR")"
+    BOOT_MOUNTED=1
+  fi
+}
+
+SKIP_PART_TABLE=
+if [ -e "$TARGET" ]; then
+  get_mddev
+  if sudo gpart show "$MDDEV" &>/dev/null; then
+    SKIP_PART_TABLE=1
+  fi
+else
+  truncate -s 8G "$TARGET"
+  get_mddev
+fi
+
+if [ -z "$SKIP_PART_TABLE" ]; then
+  echo '==> Creating partition table...'
+  sudo gpart create -s mbr "$MDDEV"
+  echo '==> Adding FAT partition...'
+  sudo gpart add -t fat16 -a 512k -b 4M -s 128M "$MDDEV"
+  sudo newfs_msdos -L efi -F 16 /dev/"$MDDEV"s1
+  echo '==> Adding BSD disklabel partition...'
+  sudo gpart add -t freebsd "$MDDEV"
+  echo '==> Initializing BSD disklabel partition...'
+  sudo gpart create -s bsd "$MDDEV"s2
+  echo '==> Creating UFS partition inside BSD disklabel partition...'
+  sudo gpart add -t freebsd-ufs -a 64k /dev/"$MDDEV"s2
+  echo '==> Initializing UFS partition...'
+  sudo newfs -U -L rootfs /dev/"$MDDEV"s2a
+fi
+
+get_mounts
+
+SKIP_INSTALL=
+if [ -e "$ROOT_MNT_DIR/.installed" ]; then
+  SKIP_INSTALL=1
+fi
+
+if [ -z "$SKIP_INSTALL" ]; then
+  echo '==> Installing world...'
+  ./do_installworld "$(realpath "$ROOT_MNT_DIR")"
+  echo '==> Installing distribution...'
+  ./do_distribution "$(realpath "$ROOT_MNT_DIR")"
+  echo '==> Installing kernel...'
+  ./do_installkernel "$(realpath "$ROOT_MNT_DIR")"
+  echo '==> Installing boot files...'
+  sudo touch "$ROOT_MNT_DIR/.installed"
+fi
+
+echo '==> Installing boot files...'
+sudo cp "$ROOT_MNT_DIR/boot/loader.efi" "$BOOT_MNT_DIR/Image"
+sudo cp nfsroot/imx8mq-mnt-reform2.dtb "$BOOT_MNT_DIR/"
+
+finish
+
+echo '==> Installing bootloader...'
+sudo dd if=nfsroot/flash.bin of="$TARGET" conv=notrunc bs=1k seek=33
+echo '==> Done'
